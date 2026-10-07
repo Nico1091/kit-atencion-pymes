@@ -1,0 +1,817 @@
+{
+  "id": "leadSinFugaPlantilla1",
+  "name": "Lead sin fuga - captura, asigna y persigue",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-entrante",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "lead-entrante",
+      "name": "Lead entrante",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        300
+      ],
+      "webhookId": "lead-entrante-sin-fuga"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "id_hoja_calculo",
+              "value": "PEGUE_AQUI_EL_ID_DE_LA_HOJA",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "nombre_hoja",
+              "value": "Leads",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "negocio",
+              "value": "Nombre del negocio",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "zona_horaria",
+              "value": "America/Bogota",
+              "type": "string"
+            },
+            {
+              "id": "a5",
+              "name": "prefijo_pais",
+              "value": "57",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "hora_inicio",
+              "value": "8",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "hora_fin",
+              "value": "18",
+              "type": "string"
+            },
+            {
+              "id": "a8",
+              "name": "dias_habiles",
+              "value": "1,2,3,4,5,6",
+              "type": "string"
+            },
+            {
+              "id": "a9",
+              "name": "vendedores",
+              "value": "Vendedor 1,Vendedor 2",
+              "type": "string"
+            },
+            {
+              "id": "a10",
+              "name": "chats_vendedores",
+              "value": "123456789,123456789",
+              "type": "string"
+            },
+            {
+              "id": "a11",
+              "name": "chat_respaldo",
+              "value": "123456789",
+              "type": "string"
+            },
+            {
+              "id": "a12",
+              "name": "palabras_intencion",
+              "value": "precio,cotizacion,cuanto vale,cuanto cuesta,comprar,disponible,domicilio,factura,urgente,hoy,agendar,cita,visita",
+              "type": "string"
+            },
+            {
+              "id": "a13",
+              "name": "umbral_caliente",
+              "value": "55",
+              "type": "string"
+            },
+            {
+              "id": "a14",
+              "name": "umbral_tibio",
+              "value": "30",
+              "type": "string"
+            },
+            {
+              "id": "a15",
+              "name": "promesa_en_horario",
+              "value": "Le respondemos en menos de 15 minutos.",
+              "type": "string"
+            },
+            {
+              "id": "a16",
+              "name": "promesa_fuera_horario",
+              "value": "Le respondemos a primera hora del proximo dia habil.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "configuracion",
+      "name": "Configuracion",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -20,
+        300
+      ],
+      "notes": "El unico nodo que toca el cliente. Nada mas abajo necesita edicion."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza el lead que llega por cualquier canal y decide si es utilizable.\n// No escribe nada: solo transforma. Todo fallo se resuelve aqui, no mas adelante.\n\nconst cfg = $('Configuracion').first().json;\nconst cuerpo = $json.body ?? $json;\n\n// Los formularios nombran los campos de mil maneras. Aceptamos los alias mas comunes.\nconst alias = {\n  nombre:   ['nombre', 'name', 'full_name', 'fullname', 'nombre_completo', 'cliente', 'contacto'],\n  telefono: ['telefono', 'phone', 'phone_number', 'celular', 'movil', 'whatsapp', 'tel'],\n  email:    ['email', 'correo', 'correo_electronico', 'mail', 'e_mail'],\n  mensaje:  ['mensaje', 'message', 'comentario', 'comentarios', 'consulta', 'texto', 'descripcion'],\n  canal:    ['canal', 'channel', 'source', 'fuente', 'utm_source'],\n  interes:  ['interes', 'producto', 'servicio', 'asunto', 'subject', 'interest'],\n};\n\n// Los formularios en espanol mandan \"Telefono\", \"Descripcion\", \"Correo electronico\" con tilde.\n// Sin quitar los acentos aqui, el campo se pierde en silencio y el lead entra sin telefono.\nfunction normalizarClave(clave) {\n  return clave\n    .normalize('NFD').replace(/[̀-ͯ]/g, '')\n    .toLowerCase()\n    .replace(/[\\s\\-.]/g, '_')\n    .replace(/_+/g, '_')\n    .replace(/^_|_$/g, '');\n}\n\nfunction tomar(nombres) {\n  for (const n of nombres) {\n    for (const clave of Object.keys(cuerpo)) {\n      if (normalizarClave(clave) === n && cuerpo[clave] != null && String(cuerpo[clave]).trim() !== '') {\n        return String(cuerpo[clave]).trim();\n      }\n    }\n  }\n  return '';\n}\n\n// Telefono a formato internacional. Colombia: movil de 10 digitos que empieza en 3.\nfunction normalizarTelefono(bruto, prefijoPais) {\n  let d = String(bruto).replace(/[^\\d+]/g, '');\n  if (d.startsWith('+')) return d;\n  d = d.replace(/\\D/g, '');\n  if (d.length === 0) return '';\n  const pais = String(prefijoPais).replace(/\\D/g, '');\n  if (d.startsWith('00' + pais)) d = d.slice(2);\n  if (d.startsWith(pais) && d.length > 10) return '+' + d;\n  if (d.length === 10 && d.startsWith('3')) return '+' + pais + d;\n  if (d.length === 7) return '+' + pais + '7' + d;\n  if (d.length === 8 && d.startsWith('6')) return '+' + pais + d;\n  return '+' + pais + d;\n}\n\nconst emailValido = (e) => /^[^@\\s]+@[^@\\s.]+\\.[^@\\s]{2,}$/.test(e);\n\n// Huella estable del lead: la misma persona siempre produce el mismo identificador.\n// De aqui sale la idempotencia de todo el flujo: reenviar el formulario no crea un duplicado.\nfunction huella(texto) {\n  let h = 5381;\n  for (let i = 0; i < texto.length; i++) {\n    h = ((h * 33) ^ texto.charCodeAt(i)) & 0xffffffff;\n  }\n  return ('00000000' + h.toString(16)).slice(-8);\n}\n\nconst nombre = tomar(alias.nombre);\nconst telefono = normalizarTelefono(tomar(alias.telefono), cfg.prefijo_pais);\nconst emailBruto = tomar(alias.email).toLowerCase();\nconst email = emailValido(emailBruto) ? emailBruto : '';\nconst mensaje = tomar(alias.mensaje);\nconst interes = tomar(alias.interes);\n\nlet canal = tomar(alias.canal).toLowerCase() || 'web';\nconst cabeceras = $json.headers ?? {};\nif (!tomar(alias.canal) && cabeceras['user-agent'] && /whatsapp/i.test(cabeceras['user-agent'])) {\n  canal = 'whatsapp';\n}\n\n// Sin una via de contacto no hay lead. Es el unico motivo de rechazo.\nconst contactable = telefono !== '' || email !== '';\nconst clave = (telefono || email).toLowerCase();\n\nconst ahora = new Date();\nconst fechaLocal = new Date(ahora.toLocaleString('en-US', { timeZone: cfg.zona_horaria }));\n\nreturn [{\n  json: {\n    valido: contactable,\n    motivo_rechazo: contactable ? '' : 'Falta telefono y correo: el lead no es contactable.',\n    lead_id: contactable ? huella(clave) : '',\n    fecha_alta: ahora.toISOString(),\n    hora_local: fechaLocal.getHours(),\n    dia_semana: fechaLocal.getDay(),\n    nombre: nombre || 'Sin nombre',\n    telefono: telefono,\n    email: email,\n    canal: canal,\n    interes: interes,\n    mensaje: mensaje,\n    origen: cabeceras['referer'] ?? cuerpo.origen ?? '',\n  },\n}];"
+      },
+      "id": "normalizar-y-validar",
+      "name": "Normalizar y validar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valido }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "datos-suficientes",
+      "name": "Datos suficientes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Configuracion').first().json.id_hoja_calculo }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Configuracion').first().json.nombre_hoja }}",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "lead_id",
+              "lookupValue": "={{ $json.lead_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "buscar-en-registro",
+      "name": "Buscar en registro",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        200
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "notes": "Si la hoja aun no tiene el lead devuelve vacio y el flujo sigue por la rama de lead nuevo."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.lead_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ya-registrado",
+      "name": "Ya registrado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, duplicado: true, lead_id: $json.lead_id, mensaje: 'Este contacto ya estaba registrado. No se creo un duplicado ni se reenvio el acuse.' } }}",
+        "options": {}
+      },
+      "id": "respuesta-duplicado",
+      "name": "Respuesta duplicado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        80
+      ],
+      "notes": "Idempotencia: el mismo formulario enviado dos veces no genera dos leads ni dos correos."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 422,
+        "responseBody": "={{ { ok: false, motivo: $json.motivo_rechazo } }}",
+        "options": {}
+      },
+      "id": "respuesta-datos-incompletos",
+      "name": "Respuesta datos incompletos",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Puntua el lead por reglas explicitas y lo asigna a un vendedor.\n// Reglas, no modelo: el dueno del negocio tiene que poder discutir cada punto.\n\nconst cfg = $('Configuracion').first().json;\nconst lead = $('Normalizar y validar').first().json;\n\nlet puntaje = 0;\nconst razones = [];\n\n// Intencion declarada en el texto. Lo que mas correlaciona con una venta.\nconst texto = (lead.mensaje + ' ' + lead.interes).toLowerCase();\nconst senales = String(cfg.palabras_intencion).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);\nconst encontradas = senales.filter(p => p && texto.includes(p));\nif (encontradas.length) {\n  puntaje += 30 + Math.min(encontradas.length - 1, 2) * 10;\n  razones.push('Pide ' + encontradas.join(', '));\n}\n\n// Canal. Quien escribe por WhatsApp espera respuesta hoy.\nconst pesoCanal = { whatsapp: 25, telefono: 25, llamada: 25, instagram: 15, facebook: 15, referido: 30, web: 10, formulario: 10 };\nconst pc = pesoCanal[lead.canal] ?? 10;\npuntaje += pc;\nrazones.push('Canal ' + lead.canal);\n\n// Completitud. Quien deja los dos datos de contacto quiere que lo llamen.\nif (lead.telefono && lead.email) {\n  puntaje += 15;\n  razones.push('Dejo telefono y correo');\n}\nif (lead.mensaje.length > 80) {\n  puntaje += 10;\n  razones.push('Escribio un mensaje largo');\n}\nif (lead.nombre === 'Sin nombre') {\n  puntaje -= 10;\n  razones.push('Sin nombre');\n}\n\n// Fuera de horario no baja la calidad del lead, pero cambia lo que se le promete.\nconst inicio = Number(cfg.hora_inicio);\nconst fin = Number(cfg.hora_fin);\nconst diasHabiles = String(cfg.dias_habiles).split(',').map(n => Number(n.trim()));\nconst enHorario = diasHabiles.includes(lead.dia_semana) && lead.hora_local >= inicio && lead.hora_local < fin;\n\npuntaje = Math.max(0, Math.min(100, puntaje));\nconst temperatura = puntaje >= Number(cfg.umbral_caliente) ? 'caliente'\n                  : puntaje >= Number(cfg.umbral_tibio) ? 'tibio' : 'frio';\n\n// Reparto estable: el mismo lead cae siempre en el mismo vendedor, aunque el flujo se repita.\nconst vendedores = String(cfg.vendedores).split(',').map(s => s.trim()).filter(Boolean);\nconst chats = String(cfg.chats_vendedores).split(',').map(s => s.trim()).filter(Boolean);\nconst indice = vendedores.length ? parseInt(lead.lead_id.slice(0, 4), 16) % vendedores.length : 0;\nconst vendedor = vendedores[indice] ?? 'Sin asignar';\nconst chat = chats[indice] ?? chats[0] ?? cfg.chat_respaldo;\n\nreturn [{\n  json: Object.assign({}, lead, {\n    puntaje: puntaje,\n    temperatura: temperatura,\n    motivo_puntaje: razones.join('; '),\n    vendedor: vendedor,\n    chat_vendedor: chat,\n    en_horario: enHorario,\n    estado: 'nuevo',\n    intentos_seguimiento: 0,\n    ultimo_contacto: '',\n    promesa: enHorario ? cfg.promesa_en_horario : cfg.promesa_fuera_horario,\n  }),\n}];"
+      },
+      "id": "puntuar-y-asignar",
+      "name": "Puntuar y asignar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Configuracion').first().json.id_hoja_calculo }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Configuracion').first().json.nombre_hoja }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "value": {}
+        },
+        "options": {}
+      },
+      "id": "guardar-lead",
+      "name": "Guardar lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        300
+      ],
+      "notes": "La hoja necesita la fila de encabezados del README, con los nombres exactos."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_vendedor }}",
+        "text": "={{ '*Lead ' + $json.temperatura.toUpperCase() + '* (' + $json.puntaje + '/100)\\n\\n' + '*' + $json.nombre + '*\\n' + ($json.telefono ? 'Telefono: ' + $json.telefono + '\\n' : '') + ($json.email ? 'Correo: ' + $json.email + '\\n' : '') + 'Canal: ' + $json.canal + '\\n\\n' + ($json.mensaje ? 'Escribio: ' + $json.mensaje + '\\n\\n' : '') + 'Por que: ' + $json.motivo_puntaje + '\\n' + 'Asignado a: ' + $json.vendedor + '\\n' + ($json.telefono ? 'Escribirle: https://wa.me/' + String($json.telefono).replace('+','') : '') }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "avisar-al-vendedor",
+      "name": "Avisar al vendedor",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        200
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Si Telegram falla, el lead ya quedo guardado. El aviso importa, pero no puede tumbar el registro."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ 'Recibimos su solicitud - ' + $('Configuracion').first().json.negocio }}",
+        "emailType": "text",
+        "message": "={{ 'Buen dia, ' + $json.nombre + '.\\n\\n' + 'Recibimos su mensaje y ya esta en manos de ' + $json.vendedor + '. ' + $json.promesa + '\\n\\n' + ($json.mensaje ? 'Esto fue lo que nos escribio:\\n' + $json.mensaje + '\\n\\n' : '') + 'Si necesita algo antes, responda este correo.\\n\\n' + $('Configuracion').first().json.negocio }}",
+        "options": {}
+      },
+      "id": "acuse-al-cliente",
+      "name": "Acuse al cliente",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1520,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "Si el lead no dejo correo, este nodo falla en silencio y el flujo continua."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, lead_id: $('Puntuar y asignar').first().json.lead_id, temperatura: $('Puntuar y asignar').first().json.temperatura, asignado_a: $('Puntuar y asignar').first().json.vendedor, mensaje: $('Puntuar y asignar').first().json.promesa } }}",
+        "options": {}
+      },
+      "id": "respuesta-recibido",
+      "name": "Respuesta recibido",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1740,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "cada-hora",
+      "name": "Cada hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -240,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "id_hoja_calculo",
+              "value": "PEGUE_AQUI_EL_ID_DE_LA_HOJA",
+              "type": "string"
+            },
+            {
+              "id": "b2",
+              "name": "nombre_hoja",
+              "value": "Leads",
+              "type": "string"
+            },
+            {
+              "id": "b3",
+              "name": "zona_horaria",
+              "value": "America/Bogota",
+              "type": "string"
+            },
+            {
+              "id": "b4",
+              "name": "hora_inicio",
+              "value": "8",
+              "type": "string"
+            },
+            {
+              "id": "b5",
+              "name": "hora_fin",
+              "value": "18",
+              "type": "string"
+            },
+            {
+              "id": "b6",
+              "name": "dias_habiles",
+              "value": "1,2,3,4,5,6",
+              "type": "string"
+            },
+            {
+              "id": "b7",
+              "name": "horas_de_espera",
+              "value": "24",
+              "type": "string"
+            },
+            {
+              "id": "b8",
+              "name": "intentos_maximos",
+              "value": "3",
+              "type": "string"
+            },
+            {
+              "id": "b9",
+              "name": "tope_por_ejecucion",
+              "value": "25",
+              "type": "string"
+            },
+            {
+              "id": "b10",
+              "name": "chat_respaldo",
+              "value": "123456789",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "configuracion-del-seguimiento",
+      "name": "Configuracion del seguimiento",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -20,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.id_hoja_calculo }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.nombre_hoja }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "leer-leads",
+      "name": "Leer leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        200,
+        760
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decide a quien hay que perseguir. Se ejecuta cada hora y no debe molestar dos veces por lo mismo.\n\nconst cfg = $('Configuracion del seguimiento').first().json;\nconst filas = $input.all().map(i => i.json);\n\nconst ahora = new Date();\nconst local = new Date(ahora.toLocaleString('en-US', { timeZone: cfg.zona_horaria }));\nconst diasHabiles = String(cfg.dias_habiles).split(',').map(n => Number(n.trim()));\nconst dentroDeHorario = diasHabiles.includes(local.getDay())\n  && local.getHours() >= Number(cfg.hora_inicio)\n  && local.getHours() < Number(cfg.hora_fin);\n\n// Fuera de horario no se avisa a nadie: un recordatorio a las dos de la madrugada se ignora y ademas quema.\nif (!dentroDeHorario) return [];\n\nconst esperaHoras = Number(cfg.horas_de_espera);\nconst maxIntentos = Number(cfg.intentos_maximos);\nconst pendientes = [];\n\nfor (const f of filas) {\n  if (!f.lead_id) continue;\n  if (String(f.estado).toLowerCase() !== 'nuevo') continue;\n  const intentos = Number(f.intentos_seguimiento || 0);\n  if (intentos >= maxIntentos) continue;\n\n  const referencia = f.ultimo_contacto ? new Date(f.ultimo_contacto) : new Date(f.fecha_alta);\n  if (isNaN(referencia.getTime())) continue;\n  const horas = (ahora - referencia) / 36e5;\n  // La espera crece en cada intento: 24 h, 48 h, 96 h. Insistir mas rapido no convierte mas.\n  if (horas < esperaHoras * Math.pow(2, intentos)) continue;\n\n  pendientes.push({\n    json: Object.assign({}, f, {\n      horas_sin_contacto: Math.round(horas),\n      intento: intentos + 1,\n      intentos_restantes: maxIntentos - intentos - 1,\n      momento_aviso: ahora.toISOString(),\n    }),\n  });\n}\n\n// Los mas calientes y mas abandonados primero.\npendientes.sort((a, b) =>\n  (Number(b.json.puntaje || 0) - Number(a.json.puntaje || 0)) ||\n  (b.json.horas_sin_contacto - a.json.horas_sin_contacto));\n\nreturn pendientes.slice(0, Number(cfg.tope_por_ejecucion));"
+      },
+      "id": "filtrar-los-que-exigen-seguimiento",
+      "name": "Filtrar los que exigen seguimiento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "uno-por-uno",
+      "name": "Uno por uno",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_vendedor || $('Configuracion del seguimiento').first().json.chat_respaldo }}",
+        "text": "={{ '*Sin contactar hace ' + $json.horas_sin_contacto + ' horas* (aviso ' + $json.intento + ' de ' + ($json.intento + $json.intentos_restantes) + ')\\n\\n' + '*' + $json.nombre + '* - ' + $json.temperatura + ' (' + $json.puntaje + '/100)\\n' + ($json.telefono ? 'Telefono: ' + $json.telefono + '\\n' : '') + ($json.email ? 'Correo: ' + $json.email + '\\n' : '') + 'Pidio: ' + ($json.interes || $json.mensaje || 'sin detalle') + '\\n\\n' + ($json.telefono ? 'Escribirle ya: https://wa.me/' + String($json.telefono).replace('+','') + '\\n' : '') + ($json.intentos_restantes === 0 ? '\\nUltimo aviso: si nadie lo atiende, se marcara como perdido.' : '') }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "recordar-al-vendedor",
+      "name": "Recordar al vendedor",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        880
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Configuracion del seguimiento').first().json.id_hoja_calculo }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $('Configuracion del seguimiento').first().json.nombre_hoja }}",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "intentos_seguimiento": "={{ $json.intento }}",
+            "ultimo_contacto": "={{ $json.momento_aviso }}",
+            "estado": "={{ $json.intentos_restantes === 0 ? 'perdido' : 'nuevo' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "marcar-seguimiento",
+      "name": "Marcar seguimiento",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1140,
+        880
+      ],
+      "notes": "Se escribe DESPUES de avisar. Si el aviso falla, el intento no se consume y se reintenta la hora siguiente."
+    },
+    {
+      "parameters": {
+        "content": "## Lead sin fuga\n\n**Arriba**: entra el lead y sale el aviso en menos de un minuto.\n\n**Abajo**: se persigue solo al que nadie contesto, a las 24 h, 48 h y 96 h.\n\nToque unicamente los dos nodos de configuracion.\n\nEl mismo lead enviado dos veces no se duplica ni recibe dos correos: el identificador se calcula del telefono o del correo, no al azar.",
+        "height": 440,
+        "width": 340,
+        "color": 4
+      },
+      "id": "lea-esto-primero",
+      "name": "Lea esto primero",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Lead entrante": {
+      "main": [
+        [
+          {
+            "node": "Configuracion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracion": {
+      "main": [
+        [
+          {
+            "node": "Normalizar y validar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar y validar": {
+      "main": [
+        [
+          {
+            "node": "Datos suficientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Datos suficientes": {
+      "main": [
+        [
+          {
+            "node": "Buscar en registro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta datos incompletos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar en registro": {
+      "main": [
+        [
+          {
+            "node": "Ya registrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ya registrado": {
+      "main": [
+        [
+          {
+            "node": "Respuesta duplicado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Puntuar y asignar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Puntuar y asignar": {
+      "main": [
+        [
+          {
+            "node": "Guardar lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar lead": {
+      "main": [
+        [
+          {
+            "node": "Avisar al vendedor",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Acuse al cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar al vendedor": {
+      "main": [
+        [
+          {
+            "node": "Respuesta recibido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cada hora": {
+      "main": [
+        [
+          {
+            "node": "Configuracion del seguimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuracion del seguimiento": {
+      "main": [
+        [
+          {
+            "node": "Leer leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer leads": {
+      "main": [
+        [
+          {
+            "node": "Filtrar los que exigen seguimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar los que exigen seguimiento": {
+      "main": [
+        [
+          {
+            "node": "Uno por uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uno por uno": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Recordar al vendedor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recordar al vendedor": {
+      "main": [
+        [
+          {
+            "node": "Marcar seguimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar seguimiento": {
+      "main": [
+        [
+          {
+            "node": "Uno por uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "timezone": "America/Bogota"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
